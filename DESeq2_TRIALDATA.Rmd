@@ -1,0 +1,79 @@
+---
+title: "Differential Gene Expression Analysis Report"
+author: "PH.FOUAD MOHSEN"
+date: "`r Sys.Date()`"
+output:
+ 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cosmo
+    highlight: tango
+---
+
+```{r setup, include=TRUE}
+# 1. Setup options and load libraries
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 8, fig.height = 6)
+library(DESeq2)
+library(ggplot2)
+library(pheatmap)
+library(dplyr)
+
+set.seed(123)
+# 2. Generate Simulated Data
+genes <- 1000
+samples <- 6
+
+counts <- matrix(
+  rnbinom(genes * samples, mu = 100, size = 1),
+  nrow = genes
+)
+rownames(counts) <- paste0("Gene_", 1:genes)
+colnames(counts) <- paste0("Sample_", 1:samples)
+
+metadata <- data.frame(
+  condition = factor(c("Control", "Control", "Control", "Disease", "Disease", "Disease")),
+  row.names = colnames(counts)
+)
+
+# 3. Run DESeq2 Analysis
+dds <- DESeqDataSetFromMatrix(countData = counts, colData = metadata, design = ~ condition)
+dds <- DESeq(dds)
+res <- results(dds)
+
+# Data Cleaning (Remove NA values)
+res_df <- as.data.frame(res) %>% filter(!is.na(padj))
+vsd <- vst(dds, blind = FALSE)
+# Principal Component Analysis to check sample clustering
+plotPCA(vsd, intgroup = "condition") + 
+  theme_minimal() + 
+  geom_text(aes(label = name), vjust = 1.5) +
+  labs(title = "Principal Component Analysis (PCA)")
+# Visualize significant genes based on Fold Change and P-value
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj))) + 
+  geom_point(aes(color = padj < 0.05 & abs(log2FoldChange) > 1), alpha = 0.6) +
+  scale_color_manual(values = c("black", "red")) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "blue") +
+  theme_minimal() +
+  labs(title = "Volcano Plot", x = "Log2 Fold Change", y = "-Log10 Adjusted P-value") +
+  theme(legend.position = "none")
+# Heatmap of the top 30 most significantly differentially expressed genes
+top_genes <- head(order(res$padj), 30)
+heatmap_data <- assay(vsd)[top_genes, ]
+
+pheatmap(
+  heatmap_data,
+  scale = "row",
+  annotation_col = metadata,
+  main = "Top 30 DEGs Heatmap",
+  color = colorRampPalette(c("blue", "white", "red"))(150)
+)
+# Create directory and save results to CSV
+if (!dir.exists("DESeq2_Results")) dir.create("DESeq2_Results")
+write.csv(res_df, "DESeq2_Results/Full_Results.csv")
+
+# Filter and display the top 10 significant genes
+sig_results <- res_df %>% filter(padj < 0.05 & abs(log2FoldChange) > 1)
+knitr::kable(head(sig_results, 10), caption = "Top 10 Significant Genes")
+```
